@@ -1,0 +1,26 @@
+# Compiled object files
+*.o
+*.obj
+
+# Executables
+simpledb
+*.out
+*.exe
+
+# Debug files
+*.dSYM/
+*.su
+
+# Database files
+*.db
+
+# Editor/IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+build/
+dist/
