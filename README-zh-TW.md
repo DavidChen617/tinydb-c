@@ -1,5 +1,7 @@
 # SimpleDB
 
+[English](README.md) | [繁體中文](README-zh-TW.md)
+
 以 C 語言從零實作的簡易關聯式資料庫引擎，目的是深入理解資料庫的內部運作原理。
 
 ## 專案說明

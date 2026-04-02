@@ -1,5 +1,7 @@
 # SimpleDB
 
+[English](README.md) | [繁體中文](README-zh-TW.md)
+
 A simple but functional relational database engine implemented in C, built from scratch to understand how databases work internally.
 
 ## What This Project Does
