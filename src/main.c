@@ -14,7 +14,8 @@ typedef struct
 
 typedef enum {
     STATEMENT_INSERT,
-    STATEMENT_SELECT
+    STATEMENT_SELECT,
+    STATEMENT_UPDATE
 } StatementType;
 
 typedef struct
@@ -59,17 +60,45 @@ int prepare_statement(InputBuffer *input, Statement *statement){
         statement->type = STATEMENT_SELECT;
         return 1;
     }
+    if(strncmp(input->buffer, "update", 6) == 0){
+        statement->type = STATEMENT_UPDATE;
+        int args = sscanf(
+                input->buffer, "update %d %32s %255s",
+                &statement->row_to_insert.id,
+                statement->row_to_insert.username,
+                statement->row_to_insert.email);
+        if(args < 3){
+            printf("Syntax error. Usage: update <id> <username> <email>\n");
+            return 0;
+        }
+        return 1;
+    }
 
     return 0;
 }
 
 // 執行 SQL 指令
 void execute_statement(Statement *statement, Table *table){
-    Cursor *cursor;
     switch(statement->type){
-        case STATEMENT_INSERT:
+        case STATEMENT_UPDATE: {
             uint32_t key = statement->row_to_insert.id;
-            cursor = table_find(table, key);
+            Cursor *cursor = table_find(table, key);
+            void *node = get_page(table->pager, cursor->page_num);
+
+            if(cursor->end_of_table || *leaf_node_key(node, cursor->cell_num) != key){
+                printf("Error: key %d not found\n", key);
+                free(cursor);
+                return;
+            }
+
+            serialize_row(&statement->row_to_insert, leaf_node_value(node, cursor->cell_num));
+            free(cursor);
+            printf("Updated.\n");
+            break;
+        }
+        case STATEMENT_INSERT: {
+            uint32_t key = statement->row_to_insert.id;
+            Cursor *cursor = table_find(table, key);
             void *node = get_page(table->pager, cursor->page_num);
 
             if(!cursor->end_of_table && *leaf_node_key(node, cursor->cell_num) == key){
@@ -79,23 +108,23 @@ void execute_statement(Statement *statement, Table *table){
             }
 
             leaf_node_insert(cursor, key, &statement->row_to_insert);
-            free(cursor); 
+            free(cursor);
             printf("Inseted.\n");
             break;
-
-        case STATEMENT_SELECT:
-            cursor = table_start(table);
+        }
+        case STATEMENT_SELECT: {
+            Cursor *cursor = table_start(table);
             Row row;
 
-            while (!cursor->end_of_table)
-            {
+            while (!cursor->end_of_table){
                 deserialize_row(cursor_value(cursor), &row);
                 print_row(&row);
                 cursor_advance(cursor);
             }
-    
+
             free(cursor);
             break;
+        }
     }
 }
 
