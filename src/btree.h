@@ -35,6 +35,7 @@ typedef enum
 // split contant
 #define LEAF_NODE_RIGHT_SPLIT_COUNT ((LEAF_NODE_MAX_CELLS + 1) / 2)
 #define LEAF_NODE_LEFT_SPLIT_COUNT ((LEAF_NODE_MAX_CELLS + 1) - LEAF_NODE_RIGHT_SPLIT_COUNT)
+#define LEAF_NODE_MIN_CELLS (LEAF_NODE_MAX_CELLS / 2)
 
 // interanl node header
 #define INTERNAL_NODE_NUM_KEYS_SIZE 4
@@ -57,6 +58,7 @@ void *leaf_node_value(void *node, uint32_t cell_num);
 void initialize_leaf_node(void *node);
 void leaf_node_insert(Cursor *cursor, uint32_t key, Row *value);
 void leaf_node_delete(Cursor *cursor);
+void leaf_node_handle_underflow(Table *table, uint32_t page_num);
 Cursor *leaf_node_find(Table *table, uint32_t page_num, uint32_t key);
 
 // node type / root access
