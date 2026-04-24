@@ -15,7 +15,8 @@ typedef struct
 typedef enum {
     STATEMENT_INSERT,
     STATEMENT_SELECT,
-    STATEMENT_UPDATE
+    STATEMENT_UPDATE,
+    STATEMENT_DELETE
 } StatementType;
 
 typedef struct
@@ -60,6 +61,15 @@ int prepare_statement(InputBuffer *input, Statement *statement){
         statement->type = STATEMENT_SELECT;
         return 1;
     }
+    if(strncmp(input->buffer, "delete", 6) == 0){
+        statement->type = STATEMENT_DELETE;
+        int args = sscanf(input->buffer, "delete %d", &statement->row_to_insert.id);
+        if(args < 1){
+            printf("Syntax error. Usage: delete <id>\n");
+            return 0;
+        }
+        return 1;
+    }
     if(strncmp(input->buffer, "update", 6) == 0){
         statement->type = STATEMENT_UPDATE;
         int args = sscanf(
@@ -80,6 +90,22 @@ int prepare_statement(InputBuffer *input, Statement *statement){
 // 執行 SQL 指令
 void execute_statement(Statement *statement, Table *table){
     switch(statement->type){
+        case STATEMENT_DELETE: {
+            uint32_t key = statement->row_to_insert.id;
+            Cursor *cursor = table_find(table, key);
+            void *node = get_page(table->pager, cursor->page_num);
+
+            if(cursor->end_of_table || *leaf_node_key(node, cursor->cell_num) != key){
+                printf("Error: key %d not found\n", key);
+                free(cursor);
+                return;
+            }
+
+            leaf_node_delete(cursor);
+            free(cursor);
+            printf("Deleted.\n");
+            break;
+        }
         case STATEMENT_UPDATE: {
             uint32_t key = statement->row_to_insert.id;
             Cursor *cursor = table_find(table, key);
