@@ -4,57 +4,89 @@
 #include "table.h"
 #include "btree.h"
 
-void print_row(Row *row)
-{
-    printf("(%d, %s, %s)\n", row->id, row->username, row->email);
+static void compute_table_constants(Table *t) {
+    t->cell_size         = LEAF_NODE_KEY_SIZE + t->meta->row_size;
+    uint32_t space       = PAGE_SIZE - LEAF_NODE_HEADER_SIZE;
+    t->max_cells         = space / t->cell_size;
+    t->min_cells         = t->max_cells / 2;
+    t->right_split_count = (t->max_cells + 1) / 2;
+    t->left_split_count  = (t->max_cells + 1) - t->right_split_count;
 }
 
-void serialize_row(Row *src, void *dest)
-{
-    memcpy(dest + ID_OFFSET, &src->id, ID_SIZE);
-    memcpy(dest + USERNAME_OFFSET, &src->username, USERNAME_SIZE);
-    memcpy(dest + EMAIL_OFFSET, &src->email, EMAIL_SIZE);
-}
+Database *db_open(const char *filename) {
+    Database *db = malloc(sizeof(Database));
+    db->pager = pager_open(filename);
 
-void deserialize_row(void *src, Row *dest)
-{
-    memcpy(&dest->id, src + ID_OFFSET, ID_SIZE);
-    memcpy(dest->username, src + USERNAME_OFFSET, USERNAME_SIZE);
-    memcpy(&dest->email, src + EMAIL_OFFSET, EMAIL_SIZE);
-}
-
-void *row_slot(Table *table, uint32_t row_num){
-    uint32_t page_num = row_num / ROWS_PER_PAGE;
-    void *page = get_page(table->pager, page_num);
-    uint32_t row_offset = row_num % ROWS_PER_PAGE;
-    return page + row_offset * ROW_SIZE;
-}
-
-Table *db_open(const char *filename){
-    Pager *pager = pager_open(filename);
-    Table *table = malloc(sizeof(Table));
-    table->pager = pager;
-    table->root_page_num = 0;
-
-    if(pager->file_length == 0){
-        void *root = get_page(pager, 0);
-        initialize_leaf_node(root);
-        set_node_root(root, true);
+    if (db->pager->file_length == 0) {
+        db->catalog.num_tables = 0;
+        catalog_flush(db->pager, &db->catalog);
+    } else {
+        catalog_load(db->pager, &db->catalog);
     }
-
-    return table;
+    return db;
 }
 
-void db_close(Table *table){
-    Pager *pager = table->pager;
-
-
-    for (uint32_t i = 0; i < pager->num_pages; i++)
-    {
-        if(pager->pages[i])
-            pager_flush(pager, i, PAGE_SIZE);
+void db_close(Database *db) {
+    catalog_flush(db->pager, &db->catalog);
+    for (uint32_t i = 0; i < db->pager->num_pages; i++) {
+        if (db->pager->pages[i])
+            pager_flush(db->pager, i, PAGE_SIZE);
     }
+    pager_close(db->pager);
+    free(db);
+}
 
-    pager_close(pager);
+Table *table_open(Database *db, const char *name) {
+    int idx = catalog_find(&db->catalog, name);
+    if (idx < 0) return NULL;
+
+    Table *t   = malloc(sizeof(Table));
+    t->pager   = db->pager;
+    t->meta    = &db->catalog.tables[idx];
+    t->root_page_num = t->meta->root_page_num;
+    compute_table_constants(t);
+    return t;
+}
+
+void table_close(Table *table) {
     free(table);
+}
+
+void serialize_row(TableMeta *meta, void **values, void *dest) {
+    for (uint32_t i = 0; i < meta->num_columns; i++) {
+        Column *col = &meta->columns[i];
+        void   *target = (char *)dest + col->offset;
+        if (col->type == COL_INT) {
+            int32_t v = (int32_t)(intptr_t)values[i];
+            memcpy(target, &v, sizeof(int32_t));
+        } else {
+            strncpy((char *)target, (char *)values[i], col->size - 1);
+            ((char *)target)[col->size - 1] = '\0';
+        }
+    }
+}
+
+void deserialize_row(TableMeta *meta, void *src, void **values) {
+    for (uint32_t i = 0; i < meta->num_columns; i++) {
+        Column *col  = &meta->columns[i];
+        void   *field = (char *)src + col->offset;
+        values[i] = field;
+    }
+}
+
+void print_row(TableMeta *meta, void *row_data) {
+    printf("(");
+    for (uint32_t i = 0; i < meta->num_columns; i++) {
+        Column *col   = &meta->columns[i];
+        void   *field = (char *)row_data + col->offset;
+        if (i > 0) printf(", ");
+        if (col->type == COL_INT) {
+            int32_t v;
+            memcpy(&v, field, sizeof(int32_t));
+            printf("%d", v);
+        } else {
+            printf("%s", (char *)field);
+        }
+    }
+    printf(")\n");
 }

@@ -3,40 +3,33 @@
 
 #include <stdint.h>
 #include "pager.h"
+#include "schema.h"
+#include "catalog.h"
 
-#define COLUMN_USERNAME_SIZE 32
-#define COLUMN_EMAIL_SIZE 255
+typedef struct {
+    Pager   *pager;
+    Catalog  catalog;
+} Database;
 
-#define ID_SIZE 4
-#define USERNAME_SIZE 33
-#define EMAIL_SIZE 256
-#define ROW_SIZE (ID_SIZE + USERNAME_SIZE + EMAIL_SIZE)
-
-#define ID_OFFSET 0
-#define USERNAME_OFFSET ID_SIZE
-#define EMAIL_OFFSET (ID_SIZE + USERNAME_SIZE)
-
-#define ROWS_PER_PAGE (PAGE_SIZE / ROW_SIZE)
-#define TABLE_MAX_ROWS (ROWS_PER_PAGE * MAX_PAGES)
-
-typedef struct
-{
-    uint32_t id;
-    char username[COLUMN_USERNAME_SIZE + 1];
-    char email[COLUMN_EMAIL_SIZE + 1];
-} Row;
-
-typedef struct
-{
-    uint32_t root_page_num;
-    Pager *pager;
+typedef struct {
+    uint32_t   root_page_num;
+    Pager     *pager;
+    TableMeta *meta;
+    // runtime btree layout (computed from meta->row_size)
+    uint32_t cell_size;
+    uint32_t max_cells;
+    uint32_t min_cells;
+    uint32_t left_split_count;
+    uint32_t right_split_count;
 } Table;
 
-void print_row(Row *row);
-void serialize_row(Row *src, void *dest);
-void deserialize_row(void *src, Row *dest);
-void *row_slot(Table *table, uint32_t row_num);
-Table *db_open(const char *filename);
-void db_close(Table *table);
+Database *db_open(const char *filename);
+void      db_close(Database *db);
+Table    *table_open(Database *db, const char *name);
+void      table_close(Table *table);
+
+void serialize_row(TableMeta *meta, void **values, void *dest);
+void deserialize_row(TableMeta *meta, void *src, void **values);
+void print_row(TableMeta *meta, void *row_data);
 
 #endif
