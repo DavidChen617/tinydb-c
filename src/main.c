@@ -369,17 +369,41 @@ int main(int argc, char *argv[]) {
         int   ntok = tokenize(buf_copy, tokens, MAX_COLUMNS + 8);
         if (ntok == 0) continue;
 
+        // For insert/update/delete: optional table name as first arg
+        // e.g. "insert users 1 foo"  or  "insert 1 foo" (uses active)
         if (strcasecmp(tokens[0], "select") == 0) {
             handle_select(db, active, tokens, ntok);
-        } else if (!active) {
-            printf("No active table. Use .use <name> or create one.\n");
         } else if (strcasecmp(tokens[0], "insert") == 0) {
-            do_insert(active, tokens + 1, ntok - 1);
+            int opened = 0;
+            char **vals = tokens + 1; int nvals = ntok - 1;
+            Table *t = active;
+            if (nvals > 0 && catalog_find(&db->catalog, vals[0]) >= 0) {
+                t = table_open(db, vals[0]); opened = 1; vals++; nvals--;
+            }
+            if (!t) printf("No active table.\n");
+            else    do_insert(t, vals, nvals);
+            if (opened && t) table_close(t);
         } else if (strcasecmp(tokens[0], "update") == 0) {
-            do_update(active, tokens + 1, ntok - 1);
+            int opened = 0;
+            char **vals = tokens + 1; int nvals = ntok - 1;
+            Table *t = active;
+            if (nvals > 0 && catalog_find(&db->catalog, vals[0]) >= 0) {
+                t = table_open(db, vals[0]); opened = 1; vals++; nvals--;
+            }
+            if (!t) printf("No active table.\n");
+            else    do_update(t, vals, nvals);
+            if (opened && t) table_close(t);
         } else if (strcasecmp(tokens[0], "delete") == 0) {
-            if (ntok < 2) { printf("Usage: delete <id>\n"); continue; }
-            do_delete(active, (uint32_t)atoi(tokens[1]));
+            int opened = 0;
+            char **args = tokens + 1; int nargs = ntok - 1;
+            Table *t = active;
+            if (nargs > 1 && catalog_find(&db->catalog, args[0]) >= 0) {
+                t = table_open(db, args[0]); opened = 1; args++; nargs--;
+            }
+            if (!t)        printf("No active table.\n");
+            else if (!nargs) printf("Usage: delete [<table>] <id>\n");
+            else           do_delete(t, (uint32_t)atoi(args[0]));
+            if (opened && t) table_close(t);
         } else {
             printf("Unknown command: %s\n", input_buf);
         }
