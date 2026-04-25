@@ -116,13 +116,85 @@ static int build_row(TableMeta *meta, char **tokens, int num_tokens, char *row_b
 
 // ── REPL helpers ──────────────────────────────────────────────────────────────
 
-static void do_select(Table *table) {
+static int col_find(TableMeta *meta, const char *name) {
+    for (uint32_t i = 0; i < meta->num_columns; i++)
+        if (strcasecmp(meta->columns[i].name, name) == 0) return (int)i;
+    return -1;
+}
+
+typedef struct {
+    int  active;
+    int  col_idx;
+    char op[4];
+    char value[MAX_VALUE_LEN];
+} WhereClause;
+
+static int row_matches(TableMeta *meta, void *row_data, WhereClause *wc) {
+    if (!wc->active) return 1;
+    Column *col   = &meta->columns[wc->col_idx];
+    void   *field = (char *)row_data + col->offset;
+    if (col->type == COL_INT) {
+        int32_t rv; memcpy(&rv, field, sizeof(int32_t));
+        int32_t cv = atoi(wc->value);
+        if (strcmp(wc->op, "=")  == 0) return rv == cv;
+        if (strcmp(wc->op, "!=") == 0) return rv != cv;
+        if (strcmp(wc->op, ">")  == 0) return rv >  cv;
+        if (strcmp(wc->op, "<")  == 0) return rv <  cv;
+        if (strcmp(wc->op, ">=") == 0) return rv >= cv;
+        if (strcmp(wc->op, "<=") == 0) return rv <= cv;
+    } else {
+        int cmp = strcmp((char *)field, wc->value);
+        if (strcmp(wc->op, "=")  == 0) return cmp == 0;
+        if (strcmp(wc->op, "!=") == 0) return cmp != 0;
+        if (strcmp(wc->op, ">")  == 0) return cmp >  0;
+        if (strcmp(wc->op, "<")  == 0) return cmp <  0;
+        if (strcmp(wc->op, ">=") == 0) return cmp >= 0;
+        if (strcmp(wc->op, "<=") == 0) return cmp <= 0;
+    }
+    return 0;
+}
+
+static void do_select(Table *table, WhereClause *wc) {
     Cursor *cursor = table_start(table);
     while (!cursor->end_of_table) {
-        print_row(table->meta, cursor_value(cursor));
+        void *row = cursor_value(cursor);
+        if (row_matches(table->meta, row, wc))
+            print_row(table->meta, row);
         cursor_advance(cursor);
     }
     free(cursor);
+}
+
+static void handle_select(Database *db, Table *active, char **tokens, int ntok) {
+    Table      *target = active;
+    int         opened = 0;
+    WhereClause wc     = {0};
+
+    if (ntok >= 4
+        && strcasecmp(tokens[1], "*")    == 0
+        && strcasecmp(tokens[2], "from") == 0) {
+        target = table_open(db, tokens[3]);
+        if (!target) { printf("Table '%s' not found.\n", tokens[3]); return; }
+        opened = 1;
+        // where <col> <op> <val>
+        if (ntok >= 8 && strcasecmp(tokens[4], "where") == 0) {
+            int idx = col_find(target->meta, tokens[5]);
+            if (idx < 0) {
+                printf("Column '%s' not found.\n", tokens[5]);
+                table_close(target); return;
+            }
+            wc.active  = 1;
+            wc.col_idx = idx;
+            strncpy(wc.op,    tokens[6], sizeof(wc.op)    - 1);
+            strncpy(wc.value, tokens[7], sizeof(wc.value) - 1);
+        }
+    } else if (!target) {
+        printf("No active table. Use .use <name> or 'select * from <table>'.\n");
+        return;
+    }
+
+    do_select(target, &wc);
+    if (opened) table_close(target);
 }
 
 static void do_insert(Table *table, char **tokens, int num_tokens) {
@@ -289,21 +361,18 @@ int main(int argc, char *argv[]) {
             continue;
         }
 
-        // ── DML (requires active table) ──
-        if (!active) {
-            printf("No active table. Use .use <name> or create one.\n");
-            continue;
-        }
-
+        // ── DML ──
         char buf_copy[INPUT_BUFFER_SIZE];
         strncpy(buf_copy, input_buf, INPUT_BUFFER_SIZE - 1);
         buf_copy[INPUT_BUFFER_SIZE - 1] = '\0';
-        char *tokens[MAX_COLUMNS + 1];
-        int   ntok = tokenize(buf_copy, tokens, MAX_COLUMNS + 1);
+        char *tokens[MAX_COLUMNS + 8];
+        int   ntok = tokenize(buf_copy, tokens, MAX_COLUMNS + 8);
         if (ntok == 0) continue;
 
         if (strcasecmp(tokens[0], "select") == 0) {
-            do_select(active);
+            handle_select(db, active, tokens, ntok);
+        } else if (!active) {
+            printf("No active table. Use .use <name> or create one.\n");
         } else if (strcasecmp(tokens[0], "insert") == 0) {
             do_insert(active, tokens + 1, ntok - 1);
         } else if (strcasecmp(tokens[0], "update") == 0) {
