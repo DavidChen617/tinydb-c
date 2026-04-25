@@ -2,26 +2,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <readline/readline.h>
+#include <readline/history.h>
 #include "table.h"
 #include "cursor.h"
 #include "btree.h"
 
 #define INPUT_BUFFER_SIZE 1024
 #define MAX_VALUE_LEN     512
-
-typedef struct {
-    char buffer[INPUT_BUFFER_SIZE];
-} InputBuffer;
-
-void read_input(InputBuffer *input) {
-    if (fgets(input->buffer, INPUT_BUFFER_SIZE, stdin) == NULL) {
-        printf("Error reading input\n");
-        exit(EXIT_FAILURE);
-    }
-    int len = strlen(input->buffer);
-    if (len > 0 && input->buffer[len - 1] == '\n')
-        input->buffer[len - 1] = '\0';
-}
 
 // ── Schema parsing ────────────────────────────────────────────────────────────
 
@@ -211,51 +199,63 @@ int main(int argc, char *argv[]) {
 
     Database *db = db_open(argv[1]);
     Table    *active = NULL;
-    InputBuffer input;
 
     while (1) {
+        char prompt[64];
         if (active)
-            printf("%s> ", active->meta->name);
+            snprintf(prompt, sizeof(prompt), "%s> ", active->meta->name);
         else
-            printf("db> ");
+            snprintf(prompt, sizeof(prompt), "db> ");
 
-        read_input(&input);
+        char *line = readline(prompt);
+        if (!line) {
+            db_close(db);
+            if (active) table_close(active);
+            printf("Bye!\n");
+            exit(EXIT_SUCCESS);
+        }
+        if (line[0] != '\0') add_history(line);
+
+        char input_buf[INPUT_BUFFER_SIZE];
+        strncpy(input_buf, line, INPUT_BUFFER_SIZE - 1);
+        input_buf[INPUT_BUFFER_SIZE - 1] = '\0';
+        free(line);
 
         // ── Meta commands ──
-        if (input.buffer[0] == '.') {
-            if (strcmp(input.buffer, ".exit") == 0) {
+        if (input_buf[0] == '.') {
+            if (strcmp(input_buf, ".exit") == 0) {
                 db_close(db);
                 if (active) table_close(active);
                 printf("Bye!\n");
                 exit(EXIT_SUCCESS);
             }
-            if (strcmp(input.buffer, ".tables") == 0) {
+            if (strcmp(input_buf, ".tables") == 0) {
                 for (uint32_t i = 0; i < db->catalog.num_tables; i++)
                     printf("  %s\n", db->catalog.tables[i].name);
                 continue;
             }
-            if (strncmp(input.buffer, ".use ", 5) == 0) {
-                const char *tname = input.buffer + 5;
+            if (strncmp(input_buf, ".use ", 5) == 0) {
+                const char *tname = input_buf + 5;
                 if (active) table_close(active);
                 active = table_open(db, tname);
                 if (!active) printf("Table '%s' not found.\n", tname);
                 else         printf("Using table '%s'.\n", tname);
                 continue;
             }
-            if (strcmp(input.buffer, ".btree") == 0) {
+            if (strcmp(input_buf, ".btree") == 0) {
                 if (!active) { printf("No active table. Use .use <name>\n"); continue; }
                 printf("Tree:\n");
                 print_tree(active, active->root_page_num, 0);
                 continue;
             }
-            printf("Unknown command: %s\n", input.buffer);
+            printf("Unknown command: %s\n", input_buf);
             continue;
         }
 
         // ── CREATE TABLE ──
-        if (strncasecmp(input.buffer, "create table ", 13) == 0) {
+        if (strncasecmp(input_buf, "create table ", 13) == 0) {
             TableMeta meta = {0};
-            if (!parse_create_table(input.buffer, &meta)) continue;
+            if (!parse_create_table(input_buf, &meta)) continue;
             if (catalog_find(&db->catalog, meta.name) >= 0) {
                 printf("Table '%s' already exists.\n", meta.name);
                 continue;
@@ -276,8 +276,8 @@ int main(int argc, char *argv[]) {
         }
 
         // ── DROP TABLE ──
-        if (strncasecmp(input.buffer, "drop table ", 11) == 0) {
-            const char *tname = input.buffer + 11;
+        if (strncasecmp(input_buf, "drop table ", 11) == 0) {
+            const char *tname = input_buf + 11;
             int idx = catalog_find(&db->catalog, tname);
             if (idx < 0) { printf("Table '%s' not found.\n", tname); continue; }
             if (active && strcmp(active->meta->name, tname) == 0) {
@@ -296,7 +296,8 @@ int main(int argc, char *argv[]) {
         }
 
         char buf_copy[INPUT_BUFFER_SIZE];
-        strncpy(buf_copy, input.buffer, INPUT_BUFFER_SIZE - 1);
+        strncpy(buf_copy, input_buf, INPUT_BUFFER_SIZE - 1);
+        buf_copy[INPUT_BUFFER_SIZE - 1] = '\0';
         char *tokens[MAX_COLUMNS + 1];
         int   ntok = tokenize(buf_copy, tokens, MAX_COLUMNS + 1);
         if (ntok == 0) continue;
@@ -311,7 +312,7 @@ int main(int argc, char *argv[]) {
             if (ntok < 2) { printf("Usage: delete <id>\n"); continue; }
             do_delete(active, (uint32_t)atoi(tokens[1]));
         } else {
-            printf("Unknown command: %s\n", input.buffer);
+            printf("Unknown command: %s\n", input_buf);
         }
     }
 
